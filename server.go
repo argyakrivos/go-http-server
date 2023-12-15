@@ -2,10 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/gorilla/mux"
 	"io"
 	"log"
 	"net/http"
-	"regexp"
 	"strconv"
 )
 
@@ -16,10 +16,7 @@ type Book struct {
 }
 
 var (
-	books          []Book
-	IndexExp       = regexp.MustCompile(`^/?$`)
-	GetAllBooksExp = regexp.MustCompile(`^/books/?$`)
-	GetBookExp     = regexp.MustCompile(`^/books/(\d+)?$`)
+	books []Book
 )
 
 func main() {
@@ -28,32 +25,14 @@ func main() {
 		{Id: 2, Title: "Web Development with Go", Author: "Jane Smith"},
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && IndexExp.MatchString(r.URL.Path):
-			handleIndex(w, r)
-			return
-		default:
-			http.NotFound(w, r)
-			return
-		}
-	})
-
-	http.HandleFunc("/books/", func(w http.ResponseWriter, r *http.Request) {
-		getBookMatch := GetBookExp.FindStringSubmatch(r.URL.Path)
-		switch {
-		case r.Method == http.MethodGet && GetAllBooksExp.MatchString(r.URL.Path):
-			handleGetAllBooks(w, r)
-			return
-		case r.Method == http.MethodGet && getBookMatch != nil:
-			bookId, _ := strconv.Atoi(getBookMatch[1])
-			handleGetBook(w, r, bookId)
-			return
-		default:
-			http.NotFound(w, r)
-			return
-		}
-	})
+	r := mux.NewRouter()
+	r.HandleFunc("/", handleIndex).Methods(http.MethodGet)
+	r.HandleFunc("/books", handleGetAllBooks).Methods(http.MethodGet)
+	r.HandleFunc("/books", handleCreateBook).Methods(http.MethodPost)
+	r.HandleFunc("/books/{id:[0-9]+}", handleGetBook).Methods(http.MethodGet)
+	r.HandleFunc("/books/{id:[0-9]+}", handleUpdateBook).Methods(http.MethodPatch)
+	r.HandleFunc("/books/{id:[0-9]+}", handleDeleteBook).Methods(http.MethodDelete)
+	http.Handle("/", r)
 
 	log.Println("Server listening on :8080")
 	log.Fatal(http.ListenAndServe("localhost:8080", nil))
@@ -68,7 +47,25 @@ func handleGetAllBooks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(books)
 }
 
-func handleGetBook(w http.ResponseWriter, r *http.Request, bookId int) {
+func handleCreateBook(w http.ResponseWriter, r *http.Request) {
+	var newBook Book
+	err := json.NewDecoder(r.Body).Decode(&newBook)
+	if err != nil {
+		http.Error(w, "Error decoding JSON", http.StatusBadRequest)
+		return
+	}
+
+	newBook.Id = len(books) + 1
+	books = append(books, newBook)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(newBook)
+}
+
+func handleGetBook(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	bookId, _ := strconv.Atoi(vars["id"])
 	for _, book := range books {
 		if book.Id == bookId {
 			w.Header().Set("Content-Type", "application/json")
@@ -76,5 +73,45 @@ func handleGetBook(w http.ResponseWriter, r *http.Request, bookId int) {
 			return
 		}
 	}
-	http.NotFound(w, r)
+
+	http.Error(w, "book not found", http.StatusNotFound)
+}
+
+func handleUpdateBook(w http.ResponseWriter, r *http.Request) {
+	var updatedBook Book
+	err := json.NewDecoder(r.Body).Decode(&updatedBook)
+	if err != nil {
+		http.Error(w, "Error decoding JSON", http.StatusBadRequest)
+		return
+	}
+
+	vars := mux.Vars(r)
+	bookId, _ := strconv.Atoi(vars["id"])
+	for i, book := range books {
+		if book.Id == bookId {
+			books[i].Title = updatedBook.Title
+			books[i].Author = updatedBook.Author
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(books[i])
+			return
+		}
+	}
+
+	http.Error(w, "book not found", http.StatusNotFound)
+}
+
+func handleDeleteBook(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	bookId, _ := strconv.Atoi(vars["id"])
+	for i, book := range books {
+		if book.Id == bookId {
+			books = append(books[:i], books[i+1:]...)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(book)
+			return
+		}
+	}
+
+	http.Error(w, "book not found", http.StatusNotFound)
 }
