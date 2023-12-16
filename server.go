@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go-http-server/db"
+	"go-http-server/models"
+	"go-http-server/service"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"io"
@@ -14,41 +15,36 @@ import (
 	"net/http"
 )
 
-type Book struct {
-	Id     primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
-	Title  string             `json:"title,omitempty" bson:"title,omitempty"`
-	Author string             `json:"author,omitempty" bson:"author,omitempty"`
-}
-
 const (
 	serverAddress   = "localhost:8080"
 	mongoUri        = "mongodb://localhost:27017"
-	mongoDb         = "dev"
+	mongoDbName     = "dev"
 	mongoCollection = "books"
 )
 
-var (
-	mongoClient    *mongo.Client
-	bookCollection *mongo.Collection
-)
+type Env struct {
+	books *service.DbService
+}
 
 func main() {
+	mongoClient := connectToMongoDB(mongoUri)
 	defer func() {
 		if err := mongoClient.Disconnect(context.Background()); err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 	}()
-
-	mongoClient = connectToMongoDB(mongoUri)
-	bookCollection = mongoClient.Database(mongoDb).Collection(mongoCollection)
+	bookCollection := mongoClient.Database(mongoDbName).Collection(mongoCollection)
+	mongoDb := &db.MongoDB{Collection: bookCollection}
+	booksService := &service.DbService{DB: mongoDb}
+	env := &Env{books: booksService}
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", handleIndex).Methods(http.MethodGet)
-	r.HandleFunc("/books", handleGetAllBooks).Methods(http.MethodGet)
-	r.HandleFunc("/books", handleCreateBook).Methods(http.MethodPost)
-	r.HandleFunc("/books/{id}", handleGetBook).Methods(http.MethodGet)
-	r.HandleFunc("/books/{id}", handleUpdateBook).Methods(http.MethodPatch)
-	r.HandleFunc("/books/{id}", handleDeleteBook).Methods(http.MethodDelete)
+	r.HandleFunc("/books", env.handleGetAllBooks).Methods(http.MethodGet)
+	r.HandleFunc("/books", env.handleCreateBook).Methods(http.MethodPost)
+	r.HandleFunc("/books/{id}", env.handleGetBook).Methods(http.MethodGet)
+	r.HandleFunc("/books/{id}", env.handleUpdateBook).Methods(http.MethodPatch)
+	r.HandleFunc("/books/{id}", env.handleDeleteBook).Methods(http.MethodDelete)
 	http.Handle("/", r)
 
 	log.Println(fmt.Sprintf("Server listening on %v", serverAddress))
@@ -72,18 +68,10 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "Hello World!")
 }
 
-func handleGetAllBooks(w http.ResponseWriter, r *http.Request) {
-	cursor, err := bookCollection.Find(context.Background(), bson.M{})
+func (e *Env) handleGetAllBooks(w http.ResponseWriter, r *http.Request) {
+	books, err := e.books.GetAllBooks()
 	if err != nil {
-		log.Println(err)
-		http.Error(w, "Error fetching books from MongoDB", http.StatusInternalServerError)
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	var books []Book
-	if err := cursor.All(context.Background(), &books); err != nil {
-		http.Error(w, "Error decoding books from MongoDB", http.StatusInternalServerError)
+		http.Error(w, "Error fetching books", http.StatusInternalServerError)
 		return
 	}
 
@@ -91,40 +79,32 @@ func handleGetAllBooks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(books)
 }
 
-func handleCreateBook(w http.ResponseWriter, r *http.Request) {
-	var newBook Book
+func (e *Env) handleCreateBook(w http.ResponseWriter, r *http.Request) {
+	var newBook models.Book
 	err := json.NewDecoder(r.Body).Decode(&newBook)
 	if err != nil {
 		http.Error(w, "Error decoding JSON", http.StatusBadRequest)
 		return
 	}
 
-	result, err := bookCollection.InsertOne(context.Background(), newBook)
+	resultBook, err := e.books.CreateBook(newBook)
 	if err != nil {
-		http.Error(w, "Error inserting book into MongoDB", http.StatusInternalServerError)
+		http.Error(w, "Error creating book", http.StatusInternalServerError)
 		return
 	}
-	newBook.Id = result.InsertedID.(primitive.ObjectID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newBook)
+	json.NewEncoder(w).Encode(resultBook)
 }
 
-func handleGetBook(w http.ResponseWriter, r *http.Request) {
+func (e *Env) handleGetBook(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bookId := vars["id"]
 
-	objectId, err := primitive.ObjectIDFromHex(bookId)
+	book, err := e.books.GetBook(bookId)
 	if err != nil {
-		http.Error(w, "Invalid book ID", http.StatusBadRequest)
-		return
-	}
-
-	var book Book
-	err = bookCollection.FindOne(context.Background(), bson.M{"_id": objectId}).Decode(&book)
-	if err != nil {
-		http.Error(w, "Book not found", http.StatusNotFound)
+		http.Error(w, "Error getting a book", http.StatusInternalServerError)
 		return
 	}
 
@@ -132,8 +112,8 @@ func handleGetBook(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(book)
 }
 
-func handleUpdateBook(w http.ResponseWriter, r *http.Request) {
-	var updatedBook Book
+func (e *Env) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
+	var updatedBook models.Book
 	err := json.NewDecoder(r.Body).Decode(&updatedBook)
 	if err != nil {
 		http.Error(w, "Error decoding JSON", http.StatusBadRequest)
@@ -143,64 +123,25 @@ func handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bookId := vars["id"]
 
-	objectId, err := primitive.ObjectIDFromHex(bookId)
+	resultBook, err := e.books.UpdateBook(bookId, updatedBook)
 	if err != nil {
-		http.Error(w, "Invalid book ID", http.StatusBadRequest)
-		return
+		http.Error(w, "Error while updating book", http.StatusInternalServerError)
 	}
-
-	var existingBook Book
-	err = bookCollection.FindOne(context.Background(), bson.M{"_id": objectId}).Decode(&existingBook)
-	if err != nil {
-		http.Error(w, "Book not found", http.StatusNotFound)
-		return
-	}
-
-	setUpdates := bson.M{}
-	if updatedBook.Title != "" && updatedBook.Title != existingBook.Title {
-		setUpdates["title"] = updatedBook.Title
-	}
-	if updatedBook.Author != "" && updatedBook.Author != existingBook.Author {
-		setUpdates["author"] = updatedBook.Author
-	}
-
-	if len(setUpdates) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(existingBook)
-		return
-	}
-
-	filter := bson.M{"_id": objectId}
-	update := bson.M{"$set": setUpdates}
-	_, err = bookCollection.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		http.Error(w, "Error updating book in MongoDB", http.StatusInternalServerError)
-		return
-	}
-
-	bookCollection.FindOne(context.Background(), bson.M{"_id": objectId}).Decode(&updatedBook)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updatedBook)
+	json.NewEncoder(w).Encode(resultBook)
 }
 
-func handleDeleteBook(w http.ResponseWriter, r *http.Request) {
+func (e *Env) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	bookId := vars["id"]
 
-	objectID, err := primitive.ObjectIDFromHex(bookId)
+	deletedBook, err := e.books.DeleteBook(bookId)
 	if err != nil {
-		http.Error(w, "Invalid book ID", http.StatusBadRequest)
-		return
-	}
-
-	var book Book
-	err = bookCollection.FindOneAndDelete(context.Background(), bson.M{"_id": objectID}).Decode(&book)
-	if err != nil {
-		http.Error(w, "Book not found", http.StatusNotFound)
+		http.Error(w, "Error while deleting book", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(book)
+	json.NewEncoder(w).Encode(deletedBook)
 }
