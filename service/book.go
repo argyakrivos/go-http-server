@@ -1,8 +1,8 @@
 package service
 
 import (
-	"go-http-server/db"
-	"go-http-server/models"
+	"go-microservice/db"
+	"go-microservice/models"
 )
 
 // BookService interface abstract the business logic,

@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/gorilla/mux"
-	"go-http-server/db"
-	"go-http-server/models"
-	"go-http-server/service"
+	"go-microservice/db"
+	"go-microservice/models"
+	"go-microservice/service"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -36,6 +36,7 @@ func (api *BookAPI) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (api *BookAPI) handleGetAllBooks(w http.ResponseWriter, r *http.Request) {
 	books, err := api.bookService.GetAllBooks()
 	if err != nil {
+		slog.Error("Error fetching books: ", err)
 		http.Error(w, "Error fetching books", http.StatusInternalServerError)
 		return
 	}
@@ -54,6 +55,7 @@ func (api *BookAPI) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 
 	resultBook, err := api.bookService.CreateBook(newBook)
 	if err != nil {
+		slog.Error("Error creating book: ", err)
 		http.Error(w, "Error creating book", http.StatusInternalServerError)
 		return
 	}
@@ -74,7 +76,7 @@ func (api *BookAPI) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, db.ErrBookNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			log.Println("Error getting a book: ", err)
+			slog.Error("Error getting a book: ", err)
 			http.Error(w, "Error getting a book", http.StatusInternalServerError)
 		}
 		return
@@ -102,7 +104,7 @@ func (api *BookAPI) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, db.ErrBookNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			log.Println("Error updating a book: ", err)
+			slog.Error("Error updating a book: ", err)
 			http.Error(w, "Error updating book", http.StatusInternalServerError)
 		}
 		return
@@ -123,7 +125,7 @@ func (api *BookAPI) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, db.ErrBookNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			log.Println("Error deleting a book: ", err)
+			slog.Error("Error deleting a book: ", err)
 			http.Error(w, "Error deleting book", http.StatusInternalServerError)
 		}
 		return

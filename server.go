@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/gorilla/mux"
-	"go-http-server/api"
-	"go-http-server/db"
-	"go-http-server/service"
+	"go-microservice/api"
+	"go-microservice/db"
+	"go-microservice/service"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -43,7 +44,7 @@ func main() {
 	bookAPI.RegisterRoutes(router)
 
 	// Start the server
-	log.Println(fmt.Sprintf("Server listening on %v", serverAddress))
+	slog.Info(fmt.Sprintf("Server listening on %v", serverAddress))
 	log.Fatal(http.ListenAndServe(serverAddress, nil))
 }
 
@@ -56,6 +57,6 @@ func connectToMongoDB(uri string) *mongo.Client {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Connected to MongoDB")
+	slog.Info("Connected to MongoDB")
 	return client
 }
