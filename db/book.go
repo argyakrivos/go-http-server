@@ -10,8 +10,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Database interface abstracts the database interactions.
-type Database interface {
+var (
+	ErrInvalidID    = errors.New("invalid book ID")
+	ErrBookNotFound = errors.New("book not found")
+)
+
+// BookRepository interface abstracts the database interactions.
+type BookRepository interface {
 	GetAllBooks() ([]models.Book, error)
 	GetBook(id string) (models.Book, error)
 	CreateBook(newBook models.Book) (models.Book, error)
@@ -19,12 +24,16 @@ type Database interface {
 	DeleteBook(id string) (models.Book, error)
 }
 
-// MongoDB implements the Database interface.
-type MongoDB struct {
+// MongoDBBookRepository implements the BookRepository interface.
+type MongoDBBookRepository struct {
 	Collection *mongo.Collection
 }
 
-func (m *MongoDB) GetAllBooks() ([]models.Book, error) {
+func NewMongoDBBookRepository(collection *mongo.Collection) BookRepository {
+	return &MongoDBBookRepository{Collection: collection}
+}
+
+func (m *MongoDBBookRepository) GetAllBooks() ([]models.Book, error) {
 	cursor, err := m.Collection.Find(context.Background(), bson.M{})
 	if err != nil {
 		return nil, fmt.Errorf("error fetching books from MongoDB: %w", err)
@@ -39,22 +48,25 @@ func (m *MongoDB) GetAllBooks() ([]models.Book, error) {
 	return books, nil
 }
 
-func (m *MongoDB) GetBook(id string) (models.Book, error) {
+func (m *MongoDBBookRepository) GetBook(id string) (models.Book, error) {
 	objectId, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		return models.Book{}, errors.New("invalid book ID")
+		return models.Book{}, ErrInvalidID
 	}
 
 	var book models.Book
 	err = m.Collection.FindOne(context.Background(), bson.M{"_id": objectId}).Decode(&book)
 	if err != nil {
-		return models.Book{}, errors.New("book not found")
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return models.Book{}, ErrBookNotFound
+		}
+		return models.Book{}, fmt.Errorf("error fetching book from MongoDB: %w", err)
 	}
 
 	return book, nil
 }
 
-func (m *MongoDB) CreateBook(newBook models.Book) (models.Book, error) {
+func (m *MongoDBBookRepository) CreateBook(newBook models.Book) (models.Book, error) {
 	result, err := m.Collection.InsertOne(context.Background(), newBook)
 	if err != nil {
 		return models.Book{}, fmt.Errorf("error inserting book into MongoDB: %w", err)
@@ -64,16 +76,16 @@ func (m *MongoDB) CreateBook(newBook models.Book) (models.Book, error) {
 	return newBook, nil
 }
 
-func (m *MongoDB) UpdateBook(id string, updatedBook models.Book) (models.Book, error) {
+func (m *MongoDBBookRepository) UpdateBook(id string, updatedBook models.Book) (models.Book, error) {
 	objectId, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		return models.Book{}, errors.New("invalid book ID")
+		return models.Book{}, ErrInvalidID
 	}
 
 	var existingBook models.Book
 	err = m.Collection.FindOne(context.Background(), bson.M{"_id": objectId}).Decode(&existingBook)
 	if err != nil {
-		return models.Book{}, errors.New("book not found")
+		return models.Book{}, ErrBookNotFound
 	}
 
 	setUpdates := bson.M{}
@@ -101,16 +113,19 @@ func (m *MongoDB) UpdateBook(id string, updatedBook models.Book) (models.Book, e
 	return updatedBook, nil
 }
 
-func (m *MongoDB) DeleteBook(id string) (models.Book, error) {
+func (m *MongoDBBookRepository) DeleteBook(id string) (models.Book, error) {
 	objectId, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		return models.Book{}, errors.New("invalid book ID")
+		return models.Book{}, ErrInvalidID
 	}
 
 	var book models.Book
 	err = m.Collection.FindOneAndDelete(context.Background(), bson.M{"_id": objectId}).Decode(&book)
 	if err != nil {
-		return models.Book{}, errors.New("book not found")
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return models.Book{}, ErrBookNotFound
+		}
+		return models.Book{}, fmt.Errorf("error deleting book from MongoDB: %w", err)
 	}
 
 	return book, nil

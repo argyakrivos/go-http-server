@@ -15,27 +15,31 @@ type BookService interface {
 	DeleteBook(id string) (models.Book, error)
 }
 
-// DbService implements the BookService interface
-type DbService struct {
-	DB db.Database
+// BookServiceImpl implements the BookService interface
+type BookServiceImpl struct {
+	DB db.BookRepository
 }
 
-func (s *DbService) GetAllBooks() ([]models.Book, error) {
+func NewBookServiceImpl(database db.BookRepository) BookService {
+	return &BookServiceImpl{DB: database}
+}
+
+func (s *BookServiceImpl) GetAllBooks() ([]models.Book, error) {
 	return s.DB.GetAllBooks()
 }
 
-func (s *DbService) GetBook(id string) (models.Book, error) {
+func (s *BookServiceImpl) GetBook(id string) (models.Book, error) {
 	return s.DB.GetBook(id)
 }
 
-func (s *DbService) CreateBook(newBook models.Book) (models.Book, error) {
+func (s *BookServiceImpl) CreateBook(newBook models.Book) (models.Book, error) {
 	return s.DB.CreateBook(newBook)
 }
 
-func (s *DbService) UpdateBook(id string, updatedBook models.Book) (models.Book, error) {
+func (s *BookServiceImpl) UpdateBook(id string, updatedBook models.Book) (models.Book, error) {
 	return s.DB.UpdateBook(id, updatedBook)
 }
 
-func (s *DbService) DeleteBook(id string) (models.Book, error) {
+func (s *BookServiceImpl) DeleteBook(id string) (models.Book, error) {
 	return s.DB.DeleteBook(id)
 }
